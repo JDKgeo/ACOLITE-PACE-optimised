@@ -8,11 +8,11 @@ The primary objective is to improve computational efficiency while retaining the
 
 ## Key improvements
 
-    - Replaced the expensive general 8-dimensional `RegularGridInterpolator` operation used in AOT LUT interpolation with a specialised 5-dimensional multilinear interpolation.
-    - Vectorised wavelength and pixel calculations to reduce Python-level iteration.
-    - Reused interpolation coordinates, neighbouring grid indices, and interpolation weights.
-    - Introduced caching of modelled radiance arrays to avoid repeated LUT calculations across spectral bands.
-    - Preserved the existing 6 × 6 pixel tile configuration.
+- Replaced the expensive general 8-dimensional `RegularGridInterpolator` operation used in AOT LUT interpolation with a specialised 5-dimensional multilinear interpolation.
+- Vectorised wavelength and pixel calculations to reduce Python-level iteration.
+- Reused interpolation coordinates, neighbouring grid indices, and interpolation weights.
+- Introduced caching of modelled radiance arrays to avoid repeated LUT calculations across spectral bands.
+- Preserved the existing 6 × 6 pixel tile configuration.
 
 ## 1. AOT LUT interpolation optimisation
 
