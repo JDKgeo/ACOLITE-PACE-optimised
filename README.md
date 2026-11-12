@@ -1,141 +1,216 @@
-## About ACOLITE
-ACOLITE combines the atmospheric correction algorithms for aquatic applications of various satellite missions developed at RBINS. This repository hosts the (more) generic version of ACOLITE with the aim of bringing together the processing of all different sensors. This new generic version was started 4 February 2021, and was released to the public on 21 April 2021. Binary releases from 20210802.0 onward are based on this codebase. [Please contact Quinten via email/ACOLITE Forum/GitHub if you find any issues.](https://odnature.naturalsciences.be/remsem/acolite-forum/viewtopic.php?f=4&t=368) The settings files are largely compatible with previous versions, but it is recommended to create a new settings file configuring only the settings you want to change.
+I’ve incorporated the existing 5-D versus 8-D interpolation numerical-equivalence results, the small-scene measurements, and the latest full-scene benchmark. I’ve kept the numerical-equivalence claim scoped to the tested interpolation points.
 
-ACOLITE allows simple and fast processing of imagery from various satellites, including Landsat (5/7/8/9) and Sentinel-2/MSI (A/B), PlanetScope (Dove and SuperDove) and RapidEye, Venµs, SPOT and Pléiades, QuickBird2, WorldView-2 and -3, Sentinel-3/OLCI (A/B) and ENVISAT/MERIS, as well as several hyperspectral sensors (CHRIS, HYPERION, HICO, PRISMA, DESIS) for coastal and inland water applications. The Dark Spectrum Fitting (DSF) atmospheric correction algorithm works especially well for turbid and productive waters, but can also be applied over clear waters and land with reasonable success. The Thermal Atmospheric Correction Tool (TACT) is included for deriving surface temperature from the thermal bands on Landsat (5/7/8/9) and other missions.
+# ACOLITE PACE OCI Optimisation
 
-Features include generation of RGB images before and after atmospheric correction, atmospheric correction of water bodies and extraction of regions of interest (defined by bounding coordinates or a polygon file). Level 2 outputs are surface level reflectance (ρs=Rrs⋅π) and derived products that are saved as geolocated datasets in a NetCDF file, and can be exported as PNG maps. The atmospheric correction is image based and needs no external inputs.
+A performance-optimised version of [ACOLITE](https://github.com/acolite/acolite), focused on reducing processing time for NASA PACE Ocean Color Instrument (OCI) data.
 
-To reduce initial download volume, no LUTs are provided in this repository. (LUTs are still in the history of the repository so it is advised to clone with a low depth, e.g. using --depth 1, to avoid pulling those in.) Required LUTs will be retrieved automatically from a separate repository (https://github.com/acolite/acolite_luts) the first time they are needed.
+The primary objective is to improve computational efficiency while retaining the original ACOLITE scientific methodology, aerosol retrieval settings, scientific LUTs, and processing configuration.
 
-ACOLITE development was funded under various projects by the Belgian Science Policy Office STEREO program under contracts SR/37/135 (JELLYFOR project) and SR/00/325 (PONDER project), and by the European Community's Seventh Framework Programme (FP7/2007-2013) under grant agreement n° 606797 (HIGHROC project). TACT development was funded by the Belgian Science Policy Office BRAIN-be program under contract BR/165/A1/MICROBIAN. The RAdCor adjacency correction, automated scene downloading, and land/water masking were developed under the Belgian Science Policy Office STEREO contract SR/00/406 (RAdCor project). The DEM shadowing implementation was funded under the Belgian Science Policy Office Impuls programme under contract IM/RT/23/ExPoSoils.
+## Key improvements
 
-**ACOLITE is provided by RBINS as an experimental tool, without explicit or implied warranty. Use of the program is at your own discretion and risk.**
+- Replaced the expensive general 8-dimensional `RegularGridInterpolator` operation used in AOT LUT interpolation with a specialised 5-dimensional multilinear interpolation.
+- Vectorised wavelength and pixel calculations to reduce Python-level iteration.
+- Reused interpolation coordinates, neighbouring grid indices, and interpolation weights.
+- Introduced caching of modelled radiance arrays to avoid repeated LUT calculations across spectral bands.
+- Preserved the existing 6 × 6 pixel tile configuration.
 
-## References
-The Dark Spectrum Fitting (DSF) algorithm was presented in:
+## 1. AOT LUT interpolation optimisation
 
-* Vanhellemont and Ruddick 2018, [Atmospheric correction of metre-scale optical satellite data for inland and coastal water applications](https://www.sciencedirect.com/science/article/pii/S0034425718303481)
+### Original implementation
 
-* Vanhellemont 2019a, [Adaptation of the dark spectrum fitting atmospheric correction for aquatic applications of the Landsat and Sentinel-2 archives](https://doi.org/10.1016/j.rse.2019.03.010)
+The original AOT estimation used an 8-dimensional `RegularGridInterpolator` (RGI), with the following dimensions:
 
-* Vanhellemont 2019b, [Daily metre-scale mapping of water turbidity using CubeSat imagery.](https://doi.org/10.1364/OE.27.0A1372)
+1. Pressure
+2. Parameter
+3. Wavelength
+4. Relative azimuth angle (RAA)
+5. View zenith angle (VZA)
+6. Solar zenith angle (SZA)
+7. Wind speed
+8. Aerosol optical thickness (AOT)
 
-New settings were suggested in:
+During the AOT calculation, parameter, wavelength, and AOT were already located at exact LUT grid nodes. Interpolation was therefore required only along the other five dimensions.
 
-* Vanhellemont 2020c, [Sensitivity analysis of the dark spectrum fitting atmospheric correction for metre- and decametre-scale satellite imagery using autonomous hyperspectral radiometry](https://doi.org/10.1364/OE.397456)
+### Optimised implementation
 
-The adaptation to Sentinel-3/OLCI, SuperDove, and VIIRS was presented in:
+A specialised 5-D multilinear interpolation was implemented:
 
-* Vanhellemont and Ruddick 2021, [Atmospheric correction of Sentinel-3/OLCI data for mapping of suspended particulate matter and chlorophyll-a concentration in Belgian turbid coastal waters](https://doi.org/10.1016/j.rse.2021.112284)
+- `np.searchsorted` identifies neighbouring grid indices.
+- Interpolation weights are calculated for the five varying dimensions.
+- The 32 interpolation corners ((2^5)) are evaluated.
+- Interpolation along the three exact-grid dimensions is avoided.
+- Existing RGI LUT values are used directly.
 
-* Vanhellemont 2023, [Evaluation of eight band SuperDove imagery for aquatic applications](https://doi.org/10.1364/OE.483418)
+This removes unnecessary interpolation operations while retaining the original multilinear interpolation formulation.
 
-* Vanhellemont et al. 2024 [Remote sensing of turbid coastal and estuarine waters with VIIRS I (375 m) and M (750 m) bands](https://doi.org/10.1080/01431161.2024.2407559)
+## 2. Vectorisation
 
-First results using ACOLITE/DSF for PRISMA are presented in:
+The initial specialised interpolation still contained loops over AOT and wavelength.
 
-* Braga et al. 2022, [Assessment of PRISMA water reflectance using autonomous hyperspectral radiometry](http://dx.doi.org/10.1016/j.isprsjprs.2022.08.009)
+These calculations were subsequently vectorised to process wavelength and pixel arrays together, reducing Python-level iteration and improving NumPy utilisation.
 
-RAdCor processing is presented in:
+A broadcasting mismatch was also corrected using:
 
-* Castagna et al. 2024, [The RAdCor ATBD](https://raw.githubusercontent.com/acolite/radcor_atbd/main/radcor_D_2_1_ATB.pdf)
+```
+result += values.T * weight[None, :]
+```
 
-* Castagna and Vanhellemont (2025), [A generalized physics-based correction for adjacency effects](https://doi.org/10.1364/AO.546766)
+The resulting modelled-radiance array retains the expected dimensions:
 
-The Thermal Atmospheric Correction Tool (TACT) is now integrated in ACOLITE and allows for processing of Landsat thermal band data to surface temperatures. TACT was presented in:
+```
+(16, 82, 2914)
+```
 
-* Vanhellemont 2020a, [Automated water surface temperature retrieval from Landsat 8/TIRS](https://doi.org/10.1016/j.rse.2019.111518)
+representing AOT, wavelength, and pixel dimensions, respectively, for the tested small scene.
 
-* Vanhellemont 2020b, [Combined land surface emissivity and temperature estimation from Landsat 8 OLI and TIRS](https://doi.org/10.1016/j.isprsjprs.2020.06.007)
+## 3. Reuse of interpolation coordinates and weights
 
-TACT performance for Antarctic mountain sites and near shore waters was evaluated in:
+The five varying interpolation coordinates are:
 
-* Vanhellemont et al. 2021a, [Towards physical habitat characterisation in the Antarctic Sør Rondane Mountains using satellite remote sensing](https://doi.org/10.1016/j.rsase.2021.100529)
+- Pressure
+- RAA
+- VZA
+- SZA
+- Wind speed
 
-* Vanhellemont et al. 2022, [Validation of Landsat 8 high resolution Sea Surface Temperature using surfers](https://doi.org/10.1016/j.ecss.2021.107650)
+Their neighbouring LUT indices and interpolation weights are calculated once and reused across AOT and wavelength calculations.
 
-## Distribution
-This repository contains all the source code to run ACOLITE in a Python environment. ACOLITE is also distributed as a binary package on the [releases page](https://github.com/acolite/acolite/releases) and is supported on the [ACOLITE forum](http://odnature.naturalsciences.be/remsem/acolite-forum/).
+This avoids repeatedly searching the LUT grids for identical interpolation coordinates.
 
-## Installation
-ACOLITE can be installed with a clone of this repository, and can be executed in an environment with the correct dependencies installed. To install and run ACOLITE:
-* cd into a suitable directory and clone the git repository: `git clone --depth 1 https://github.com/acolite/acolite`
-* cd into the new acolite directory `cd acolite`
-* set up the correct Python packages or an acolite environment (see below)
-* run `python launch_acolite.py`
+## 4. Modelled-radiance caching
 
-If the "acolite" clone is in your path, then the code can be imported and used directly in other Python scripts. For example with the "acolite" clone in a git directory in your home:
+A `rhot_aot_cache` was introduced to avoid recalculating the complete modelled-radiance array for every spectral band.
 
-            import sys, os
-            user_home = os.path.expanduser("~")
-            sys.path.append('{}/git/acolite'.format(user_home))
-            import acolite as ac
+The cache stores arrays indexed by LUT identifier. Subsequent bands using the same LUT reuse the stored array.
 
-## Dependencies
-ACOLITE is coded in Python 3, and requires a suitable environment with a number of Python packages to run. This environment can for example be set up using (micro)mamba or conda and the packages on conda-forge:
+This is applicable to the tested PACE OCI processing case, where the relevant geometry is common across spectral bands.
 
-            micromamba create --file environment.yml
-or
+A cache-handling issue involving entries containing `None` was also addressed. Such entries are treated as cache misses, allowing the modelled radiance to be recalculated rather than causing a `NoneType` error.
 
-            conda env create --file environment.yml
+The subsequent test successfully generated valid arrays for both MOD1 and MOD2.
 
-A more manual enviroment set up could be performed using:
+## 5. Numerical equivalence
 
-            conda create -n acolite -c conda-forge python=3
-            conda activate acolite
-            conda install -c conda-forge numpy matplotlib scipy gdal libgdal-jp2openjpeg libgdal-netcdf pyproj scikit-image pyhdf pyresample netcdf4 h5py requests pygrib cartopy zarr fsspec aiohttp
+The specialised 5-D interpolation was compared against the original 8-D `RegularGridInterpolator` implementation.
 
-Note that the above command assumes the use of GDAL >= 3.9, with JP2000 support to process Sentinel-2 imagery, and NetCDF support to output GeoTIFF files, which are installed by libgdal-jp2openjpeg and libgdal-netcdf. For GDAL < 3.9 these libgdal packages are not required. In certain environments the fsspec and aiohttp packages are also required for processing of zarr data.
+| LUT  | Maximum absolute difference | Mean absolute difference | RMSE                  |
+| ---- | --------------------------- | ------------------------ | --------------------- |
+| MOD1 | (1.49 \times 10^{-7})       | (4.20 \times 10^{-9})    | (9.29 \times 10^{-9}) |
+| MOD2 | (2.38 \times 10^{-7})       | (5.54 \times 10^{-9})    | (1.17 \times 10^{-8}) |
 
-## Ancillary and DEM/GED data download
-ACOLITE can automatically retrieve Copernicus DEM data (30 or 90 metre resolution) from the Amazon Web Services Public Datasets (e.g. https://registry.opendata.aws/copernicus-dem/). No account is necessary. The Copernicus 30 metre DEM is now the default DEM, but the use of a DEM needs to be set by dem_pressure=True.
+The differences are extremely small and demonstrate close numerical agreement between the specialised 5-D implementation and the original 8-D RGI implementation at the tested interpolation points.
 
-ACOLITE can automatically retrieve ancillary data (ozone, water vapour, pressure and wind speed) from the servers of the Ocean Biology Processing Group (OBPG) at NASA (https://oceandata.sci.gsfc.nasa.gov) and SRTM DEM and ASTER GED data from NASA's Land Processes Distributed Active Archive Center (LP DAAC) at the USGS Earth Resources Observation and
-Science (EROS) Center (https://e4ftl01.cr.usgs.gov/MEASURES/) for both resources an EarthData account is required: https://urs.earthdata.nasa.gov/users/new
+**Boundary handling qualification:** The original RGI uses `fill_value=np.nan` for coordinates outside LUT boundaries. The saved source snapshot clips interpolation indices but does not explicitly mask out-of-range coordinates. This behaviour should be checked before claiming equivalence for all possible interpolation coordinates.
 
-Your EarthData account needs to have approval for OB.DAAC Data Access and LP DAAC Data Pool to access the ancillary, SRTM DEM, and ASTER GED datasets. Login to your EarthData account to check Authorised Apps, and click Approve More Applications if necessary: https://urs.earthdata.nasa.gov/profile
+## 6. Performance benchmarks
 
-ACOLITE tries to retrieve the credentials for accessing EARTHDATA either from your .netrc file (host "earthdata"), or EARTHDATA_u and EARTHDATA_p (for username and password) from the system environment variables. Alternatively EARTHDATA_u and EARTHDATA_p can also be specified in the processing settings file or the general ACOLITE credentials file at config/credentials.txt. To set up your .netrc file for ACOLITE, make sure it has strict access permissions (-rw-------, use e.g. chmod 600 ~/.netrc), and add the following:
+### 6.1 Small-scene benchmark
 
-            machine earthdata
-            login YOUR-LOGIN
-            password YOUR-PASSWORD
+Test scene:
 
+| Parameter        | Value        |
+| ---------------- | ------------ |
+| Image dimensions | 372 × 279    |
+| Number of tiles  | 2,914        |
+| Tile size        | 6 × 6 pixels |
 
-## TACT installation
-TACT is now integrated into ACOLITE, and allows for processing of the Landsat thermal data to surface temperature. TACT needs libRadtran to be installed to perform simulations of the atmospheric down and upwelling radiances and transmittance: http://libradtran.org/doku.php
+Observed timings:
 
-libRadtran can be manually compiled and installed in the external directory, or an executable binary in your $PATH can be used, for example by installing the package from conda-forge:
+| Operation                               | Processing time     |
+| --------------------------------------- | ------------------- |
+| LUT loading                             | 42.0 s              |
+| First surface-reflectance band (346 nm) | 35.4 s              |
+| Next band (348 nm)                      | 0.1 s               |
+| Subsequent bands                        | Approximately 0.1 s |
 
-            micromamba install conda-forge::rubin-libradtran
-or
+The L2W NetCDF output was successfully generated.
 
-            conda install conda-forge::rubin-libradtran
+### 6.2 Tile-count scaling observation
 
-If you are using the executable binary in your $PATH, set `use_system_libradtran=True` in your settings file.
+A larger scene contained 60,420 tiles. Its recorded first-band processing time was 771.8 seconds.
 
-If you are using a manual installation, ACOLITE expects the libRadtran (v2.0.5) to be in external/libRadtran-2.0.5 directory, but this can be changed by editing the configuration file `nano config/config.txt` and providing the full path to the libRadtran directory at a different location to the libradtran_dir= configuration. To install libRadtran in the external directory (when in the main acolite directory):
+| Metric                     | Small scene | Larger scene |
+| -------------------------- | ----------- | ------------ |
+| Number of tiles            | 2,914       | 60,420       |
+| First-band processing time | 35.4 s      | 771.8 s      |
 
-            mkdir external
-            cd external
-            wget http://www.libradtran.org/download/libRadtran-2.0.5.tar.gz
-            gzip -d libRadtran-2.0.5.tar.gz
-            tar -xvf libRadtran-2.0.5.tar
-            cd libRadtran-2.0.5
-            ./configure
-            make
-            make check
+The tile-count ratio is approximately 20.72, while the processing-time ratio is approximately 21.8.
 
-ACOLITE/TACT can use reptran data if it is present and if tact_reptran=medium or tact_reptran=fine. To get reptran, download and extract it in the libRadtran-2.0.5 directory:
+This indicates broadly similar scaling with tile count for this operation. It does not establish that increasing tile size would improve overall performance.
 
-            cd external/libRadtran-2.0.5
-            wget "http://www.meteo.physik.uni-muenchen.de/~libradtran/lib/exe/fetch.php?media=download:reptran_2017_all.tar.gz" -O reptran_2017_all.tar.gz
-            tar -xvf reptran_2017_all.tar.gz
-            rm reptran_2017_all.tar.gz
+### 6.3 Full-scene PACE OCI benchmark
 
-To add optical properties of clouds and aerosols (not currently used), similarly download and extract the optprop_v2.1 file in the libRadtran-2.0.5 directory:
+A full-scene comparison was performed using the same PACE OCI L1B input:
 
-            cd external/libRadtran-2.0.5
-            wget "http://www.meteo.physik.uni-muenchen.de/~libradtran/lib/exe/fetch.php?media=download:optprop_v2.1.tar.gz" -O optprop_v2.1.tar.gz
-            tar -xvf optprop_v2.1.tar.gz
-            rm optprop_v2.1.tar.gz
+`PACE_OCI.20250719T105436.L1B.V3.nc`
+
+| Parameter        | Value        |
+| ---------------- | ------------ |
+| Image dimensions | 1287 × 1173  |
+| Number of tiles  | 42,140       |
+| Tile size        | 6 × 6 pixels |
+
+Processing-time comparison:
+
+| Processing stage                    | Original ACOLITE | Optimised ACOLITE |
+| ----------------------------------- | ---------------- | ----------------- |
+| AOT estimation                      | 7 h 27 min 32 s  | 7 min 20 s        |
+| End-to-end processing to L2W NetCDF | 7 h 53 min 38 s  | 26 min 05 s       |
+
+Performance improvement:
+
+| Metric                        | Improvement         |
+| ----------------------------- | ------------------- |
+| AOT estimation speedup        | Approximately 61.0× |
+| AOT processing-time reduction | Approximately 98.4% |
+| End-to-end speedup            | Approximately 18.2× |
+
+Both runs generated L2R and L2W NetCDF products. The latest optimised run successfully generated Rrs datasets and corresponding quicklook images.
+
+These measurements demonstrate a substantial reduction in PACE OCI processing time, particularly during AOT estimation.
+
+The benchmark timings describe processing performance. Numerical equivalence of the complete full-scene retrieval products is a separate validation requirement.
+
+## 7. Components retained unchanged
+
+The optimisation focuses on computational implementation rather than changes to the scientific retrieval methodology.
+
+| Component                               | Status                        |
+| --------------------------------------- | ----------------------------- |
+| Scientific LUTs                         | Unchanged                     |
+| Aerosol retrieval methodology           | Unchanged                     |
+| Retrieval thresholds and settings       | Unchanged                     |
+| Tile size                               | Retained at 6 × 6 pixels      |
+| AOT interpolation implementation        | Specialised 5-D interpolation |
+| Repeated modelled-radiance calculations | Cached and reused             |
+| Surface-reflectance computation         | Further profiling required    |
+
+## 8. Remaining work
+
+The following items remain relevant to finalising the implementation:
+
+- Validate out-of-range interpolation behaviour against the original RGI implementation.
+- Confirm the final working source contains the vectorised implementation and cache safeguard.
+- Complete pixel-wise comparison of full-scene AOT and Rrs products.
+- Profile the first-band surface-reflectance calculation to identify further computational bottlenecks.
+- Reduce excessive diagnostic logging. The latest test log contained approximately 25,425 lines, largely from repeated debugging messages.
+
+The existing 6 × 6 tile size should be retained during these investigations to avoid introducing additional variables into performance and numerical comparisons.
+
+## 9. Acknowledgement and licensing
+
+This work is based on the original [ACOLITE repository](https://github.com/acolite/acolite).
+
+The original ACOLITE project and its contributors are acknowledged. This repository focuses on computational optimisation for PACE OCI processing and is not intended to replace or redefine the original scientific methodology.
+
+Refer to the repository's `LICENSE` file for licensing information. Original copyright notices and applicable licence terms should be preserved.
+
+## Summary
+
+The principal achievement is the acceleration of AOT LUT interpolation through a specialised 5-D implementation, vectorised calculations, reuse of interpolation coordinates and weights, and caching of modelled radiance.
+
+The specialised interpolation demonstrates very close numerical agreement with the original 8-D RGI implementation at the tested interpolation points. Full-scene PACE OCI processing time was reduced from approximately 7 hours 54 minutes to 26 minutes, corresponding to an end-to-end speedup of approximately 18.2×.
+
+The optimisation retains the original scientific LUTs, aerosol retrieval methodology, retrieval settings, and tile configuration. Further work will focus on boundary-condition validation, full-scene product comparison, and profiling the remaining processing bottlenecks.
+
+Clarify the benchmark timing basisSeparate demonstrated results from pending work
