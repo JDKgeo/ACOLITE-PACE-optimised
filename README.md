@@ -1,5 +1,3 @@
-I’ve incorporated the existing 5-D versus 8-D interpolation numerical-equivalence results, the small-scene measurements, and the latest full-scene benchmark. I’ve kept the numerical-equivalence claim scoped to the tested interpolation points.
-
 # ACOLITE PACE OCI Optimisation
 
 A performance-optimised version of [ACOLITE](https://github.com/acolite/acolite), focused on reducing processing time for NASA PACE Ocean Color Instrument (OCI) data.
@@ -80,9 +78,10 @@ The subsequent test successfully generated valid arrays for both MOD1 and MOD2.
 The specialised 5-D interpolation was compared against the original 8-D `RegularGridInterpolator` implementation.
 
 | LUT  | Maximum absolute difference | Mean absolute difference | RMSE                  |
-| ---- | --------------------------- | ------------------------ | --------------------- |
-| MOD1 | (1.49 \times 10^{-7})       | (4.20 \times 10^{-9})    | (9.29 \times 10^{-9}) |
-| MOD2 | (2.38 \times 10^{-7})       | (5.54 \times 10^{-9})    | (1.17 \times 10^{-8}) |
+| :--- | :-------------------------- | :----------------------- | :-------------------- |
+| MOD1 | 1.49 &times; 10<sup>-7</sup> | 4.20 &times; 10<sup>-9</sup> | 9.29 &times; 10<sup>-9</sup> |
+| MOD2 | 2.38 &times; 10<sup>-7</sup> | 5.54 &times; 10<sup>-9</sup> | 1.17 &times; 10<sup>-8</sup> |
+
 
 The differences are extremely small and demonstrate close numerical agreement between the specialised 5-D implementation and the original 8-D RGI implementation at the tested interpolation points.
 
@@ -107,7 +106,7 @@ Observed timings:
 | LUT loading                             | 42.0 s              |
 | First surface-reflectance band (346 nm) | 35.4 s              |
 | Next band (348 nm)                      | 0.1 s               |
-| Subsequent bands                        | Approximately 0.1 s |
+| Subsequent bands                        | Approx. 0.1 s       |
 
 The L2W NetCDF output was successfully generated.
 
@@ -143,11 +142,11 @@ Processing-time comparison:
 
 Performance improvement:
 
-| Metric                        | Improvement         |
-| ----------------------------- | ------------------- |
-| AOT estimation speedup        | Approximately 61.0× |
-| AOT processing-time reduction | Approximately 98.4% |
-| End-to-end speedup            | Approximately 18.2× |
+| Metric                        | Improvement (approx.)  |
+| ----------------------------- | ---------------------- |
+| AOT estimation speedup        | 61.0×                  |
+| AOT processing-time reduction | 98.4%                  |
+| End-to-end speedup            | 18.2×                  |
 
 Both runs generated L2R and L2W NetCDF products. The latest optimised run successfully generated Rrs datasets and corresponding quicklook images.
 
@@ -169,7 +168,15 @@ The optimisation focuses on computational implementation rather than changes to 
 | Repeated modelled-radiance calculations | Cached and reused             |
 | Surface-reflectance computation         | Further profiling required    |
 
-## 8. Remaining work
+## Summary
+
+The principal achievement is the acceleration of AOT LUT interpolation through a specialised 5-D implementation, vectorised calculations, reuse of interpolation coordinates and weights, and caching of modelled radiance.
+
+The specialised interpolation demonstrates very close numerical agreement with the original 8-D RGI implementation at the tested interpolation points. Full-scene PACE OCI processing time was reduced from approximately 7 hours 54 minutes to 26 minutes, corresponding to an end-to-end speedup of approximately 18.2×.
+
+The optimisation retains the original scientific LUTs, aerosol retrieval methodology, retrieval settings, and tile configuration. Further work will focus on boundary-condition validation, full-scene product comparison, and profiling the remaining processing bottlenecks.
+
+## Further plan
 
 The following items remain relevant to finalising the implementation:
 
@@ -181,20 +188,10 @@ The following items remain relevant to finalising the implementation:
 
 The existing 6 × 6 tile size should be retained during these investigations to avoid introducing additional variables into performance and numerical comparisons.
 
-## 9. Acknowledgement and licensing
+## Acknowledgement and licensing
 
 This work is based on the original [ACOLITE repository](https://github.com/acolite/acolite).
 
 The original ACOLITE project and its contributors are acknowledged. This repository focuses on computational optimisation for PACE OCI processing and is not intended to replace or redefine the original scientific methodology.
 
 Refer to the repository's `LICENSE` file for licensing information. Original copyright notices and applicable licence terms should be preserved.
-
-## Summary
-
-The principal achievement is the acceleration of AOT LUT interpolation through a specialised 5-D implementation, vectorised calculations, reuse of interpolation coordinates and weights, and caching of modelled radiance.
-
-The specialised interpolation demonstrates very close numerical agreement with the original 8-D RGI implementation at the tested interpolation points. Full-scene PACE OCI processing time was reduced from approximately 7 hours 54 minutes to 26 minutes, corresponding to an end-to-end speedup of approximately 18.2×.
-
-The optimisation retains the original scientific LUTs, aerosol retrieval methodology, retrieval settings, and tile configuration. Further work will focus on boundary-condition validation, full-scene product comparison, and profiling the remaining processing bottlenecks.
-
-Clarify the benchmark timing basisSeparate demonstrated results from pending work
